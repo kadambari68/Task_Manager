@@ -152,7 +152,8 @@ var ALLOWED_ATTACHMENT_TYPES = [
   'application/vnd.ms-powerpoint',
   'application/vnd.openxmlformats-officedocument.presentationml.presentation',
   'text/plain', 'text/csv',
-  'application/zip', 'application/x-zip-compressed'
+  'application/zip', 'application/x-zip-compressed',
+  'video/mp4', 'video/mpeg', 'video/quicktime', 'video/webm', 'video/ogg', 'video/x-msvideo', 'video/3gpp'
 ];
 
 var MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024; // 10 MB
@@ -552,7 +553,7 @@ function addComment(taskId, text, attachmentUrls) {
     if (actor.role !== 'Owner') {
       var tr = findTaskRow_(taskId);
       if (!tr) return err_('NOT_FOUND');
-      if (!canActorAccessTaskRow_(actor, tr.data)) return err_('UNAUTHORIZED');
+      if (!canActorCommentOnTask_(actor, tr.data)) return err_('UNAUTHORIZED');
     }
 
     var commentId = 'CMT-' + Date.now();
@@ -573,24 +574,20 @@ function addComment(taskId, text, attachmentUrls) {
           var creatorEmail = String(trToNotify.data[COL.CREATOR_EMAIL] || '').toLowerCase();
           var actorE = String(actor.email || '').toLowerCase();
 
-          var recipients = [];
-          // Standard Participants
-          if (ownerEmail && ownerEmail !== actorE) recipients.push(ownerEmail);
-          if (creatorEmail && creatorEmail !== actorE && creatorEmail !== ownerEmail) recipients.push(creatorEmail);
-
-          // Parse @mentions
-          // Supports @email@domain.com or @FirstName (if unique in memMap)
           var memMap = getMemberMap_();
           var mentionRegex = /@([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}|[a-zA-Z0-9._-]+)/g;
           var match;
+          var mentionedEmails = [];
+          var mentionCount = 0;
+
           while ((match = mentionRegex.exec(cleanTxt)) !== null) {
+            mentionCount++;
             var mention = match[1].toLowerCase();
             var targetEmail = '';
 
             if (mention.indexOf('@') > 0) {
               targetEmail = mention;
             } else {
-              // Try to find by name (case-insensitive check against all members)
               for (var em in memMap) {
                 var m = memMap[em];
                 if (m && (m.name || '').toLowerCase().indexOf(mention) !== -1) {
@@ -600,9 +597,19 @@ function addComment(taskId, text, attachmentUrls) {
               }
             }
 
-            if (targetEmail && targetEmail !== actorE && recipients.indexOf(targetEmail) === -1) {
-              recipients.push(targetEmail);
+            if (targetEmail && targetEmail !== actorE && mentionedEmails.indexOf(targetEmail) === -1) {
+              mentionedEmails.push(targetEmail);
             }
+          }
+
+          var recipients = [];
+          if (mentionCount > 0) {
+            // If mentions exist, ONLY notify the valid non-self mentioned users.
+            recipients = mentionedEmails;
+          } else {
+            // Standard Participants (only if no mentions used)
+            if (ownerEmail && ownerEmail !== actorE) recipients.push(ownerEmail);
+            if (creatorEmail && creatorEmail !== actorE && creatorEmail !== ownerEmail) recipients.push(creatorEmail);
           }
 
           // Also notify if only an attachment was added with no text (optional but good)
@@ -815,28 +822,32 @@ function getComments(taskId) {
     // W6 SPRINT 2: Tighten visibility to current owner + creator + Owners/Managers.
     // Previously used canActorAccessTaskRow_ which also allowed past owners and
     // teammates via team-scope — too broad per business decision.
-    if (actor.role !== 'Owner' && actor.role !== 'Manager') {
-      var ownerEmail = String(tr.data[COL.OWNER_EMAIL] || '').toLowerCase();
-      var creatorEmail = String(tr.data[COL.CREATOR_EMAIL] || '').toLowerCase();
-      var actEmail = String(actor.email || '').toLowerCase();
-      if (actEmail !== ownerEmail && actEmail !== creatorEmail) return err_('UNAUTHORIZED');
-    }
+    if (!canActorCommentOnTask_(actor, tr.data)) return err_('UNAUTHORIZED');
 
     var sheet = getCommentSheet_();
-    var data = sheet.getDataRange().getValues();
+    var lastRow = sheet.getLastRow();
+    var lastCol = Math.max(sheet.getLastColumn(), 7);
     var out = [];
 
-    for (var i = 1; i < data.length; i++) {
-      if (data[i][1] !== taskId) continue;
+    if (lastRow < 2) return ok_(out);
+
+    var matches = sheet.getRange(2, 2, lastRow - 1, 1)
+      .createTextFinder(String(taskId))
+      .matchEntireCell(true)
+      .findAll();
+
+    for (var i = 0; i < matches.length; i++) {
+      var rowNum = matches[i].getRow();
+      var row = sheet.getRange(rowNum, 1, 1, lastCol).getValues()[0];
       var urls = [];
-      try { urls = JSON.parse(data[i][6] || '[]'); } catch (e) { }
+      try { urls = JSON.parse(row[6] || '[]'); } catch (e) { }
       out.push({
-        commentId: data[i][0],
-        taskId: data[i][1],
-        authorEmail: data[i][2],
-        authorName: data[i][3],
-        text: data[i][4],
-        timestamp: data[i][5] ? new Date(data[i][5]).toISOString() : '',
+        commentId: row[0],
+        taskId: row[1],
+        authorEmail: row[2],
+        authorName: row[3],
+        text: row[4],
+        timestamp: row[5] ? new Date(row[5]).toISOString() : '',
         attachments: urls
       });
     }

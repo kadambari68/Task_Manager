@@ -59,7 +59,7 @@ const STATUS = {
 // Key = current status. Value = array of allowed next statuses.
 // ------------------------------------------------------------------
 const TASK_TRANSITIONS = {
-  'To Do': ['In Progress', 'On Hold'],
+  'To Do': ['In Progress', 'On Hold', 'Done', 'Archived'],
   'In Progress': ['In Review', 'On Hold', 'Done'],
   'In Review': ['In Progress', 'On Hold', 'Done'],
   'On Hold': ['To Do', 'In Progress'],
@@ -227,11 +227,13 @@ function bootstrapApp() {
 
     // Load projects (non-fatal — new Projects sheet may not exist yet)
     var projects = [];
-    try { projects = getProjectsPayload_(email, user.role); } catch (e) { /* sheet not yet created */ }
 
     // Chat unread count (non-fatal — Chat sheet may not exist yet)
     var unreadCount = 0;
-    try { var uc = getUnreadCount(); if (uc && uc.success) unreadCount = uc.data.total; } catch (e) { }
+
+    // Keep first paint light at scale. Owners can lazy-load the remaining
+    // cross-team tasks; Managers/Members stay within their natural scope.
+    var bootstrapTaskLimit = (user.role === 'Owner') ? 50 : 100;
 
     return ok_({
       user: user,
@@ -239,7 +241,7 @@ function bootstrapApp() {
       teams: getAllTeams_(),
       taskTypes: getTaskTypes_(),
       slaConfig: getSLAConfig_(),
-      tasks: getTaskPage_(email, user.role, user.team, memberMap, 0, 150), // Phase 4: Pagination limit
+      tasks: getTaskPage_(email, user.role, user.team, memberMap, 0, bootstrapTaskLimit), // Phase 4: Pagination limit
       projects: projects,
       unreadCount: unreadCount
     });
@@ -287,6 +289,33 @@ function withScriptLock_(waitMs, fn) {
   } finally {
     try { lock.releaseLock(); } catch (e) { }
   }
+}
+
+function canActorAssignTarget_(actor, target) {
+  if (!actor || !target) return false;
+  if (actor.role === 'Owner') return true;
+  var actorTeam = String(actor.team || '');
+  var targetTeam = String(target.team || '');
+  if (actor.role === 'Manager') {
+    return target.role === 'Owner' || target.role === 'Manager' || (actorTeam && targetTeam === actorTeam);
+  }
+  return !!actorTeam && targetTeam === actorTeam;
+}
+
+function canActorCommentOnTask_(actor, row) {
+  if (!actor || !row) return false;
+  if (actor.role === 'Owner') return true;
+  var ownerEmail = String(row[COL.OWNER_EMAIL] || '').toLowerCase();
+  var creatorEmail = String(row[COL.CREATOR_EMAIL] || '').toLowerCase();
+  var rowTeam = String(row[COL.CURRENT_TEAM] || '');
+  var homeTeam = String(row[COL.HOME_TEAM] || row[COL.CURRENT_TEAM] || '');
+  var creatorTeam = '';
+  if (creatorEmail) {
+    var creator = getMemberByEmail_(creatorEmail);
+    creatorTeam = creator ? String(creator.team || '') : '';
+  }
+  var actorEmail = String(actor.email || '').toLowerCase();
+  return rowTeam === actor.team || homeTeam === actor.team || creatorTeam === actor.team || ownerEmail === actorEmail || creatorEmail === actorEmail;
 }
 
 function canActorAccessTaskRow_(actor, row) {
@@ -446,6 +475,27 @@ function getProjectStatusMap_() {
   }
 }
 
+function getChecklistSummaryMap_() {
+  var out = {};
+  try {
+    var sheet = getSheet(SHEETS.CHECKLISTS || 'Checklists');
+    if (!sheet) return out;
+    var lastRow = sheet.getLastRow();
+    if (lastRow < 2) return out;
+    var data = sheet.getRange(2, 1, lastRow - 1, 5).getValues();
+    for (var i = 0; i < data.length; i++) {
+      var taskId = data[i][1];
+      if (!taskId) continue;
+      if (!out[taskId]) out[taskId] = { total: 0, done: 0 };
+      out[taskId].total++;
+      if (data[i][3] === true || String(data[i][3]).toLowerCase() === 'true') out[taskId].done++;
+    }
+  } catch (e) {
+    console.warn('getChecklistSummaryMap_: ' + e.message);
+  }
+  return out;
+}
+
 function getMemberMap_() {
   var cache = CacheService.getScriptCache();
   var key = 'member_map_v6';
@@ -581,6 +631,7 @@ function getTaskPage_(email, role, userTeam, memberMap, offset, limit) {
   userTeam = userTeam || '';
   var emailLower = email.toLowerCase();
   var visible = [];
+  var checklistSummary = getChecklistSummaryMap_();
 
   for (var i = 0; i < allData.length; i++) {
     var row = allData[i];
@@ -615,7 +666,7 @@ function getTaskPage_(email, role, userTeam, memberMap, offset, limit) {
   var isMemberRole = (role === 'Member');
   return {
     tasks: page.map(function (row) {
-      var t = parseTaskRow_(row, memberMap, now);
+      var t = parseTaskRow_(row, memberMap, now, checklistSummary);
       // S3.4 SPRINT 3: Strip phone PII for Members — they have no escalation use case.
       if (isMemberRole) t.ownerPhone = '';
       return t;
@@ -630,7 +681,8 @@ function getTasksForCurrentUser() {
   var email = Session.getActiveUser().getEmail();
   var memberMap = getMemberMap_();
   var user = memberMap[email.toLowerCase()] || { role: 'Member', team: '' };
-  return getTaskPage_(email, user.role, user.team, memberMap, 0, 1000).tasks;
+  var limit = (user.role === 'Owner') ? 50 : 100;
+  return getTaskPage_(email, user.role, user.team, memberMap, 0, limit).tasks;
 }
 
 // Column map (0-based): A=0 TaskID, B=1 Name, C=2 Type, D=3 OwnerEmail,
@@ -640,7 +692,7 @@ function getTasksForCurrentUser() {
 // R=17 LastReminderSent, S=18 SLABreached, T=19 SLAHours,
 // U=20 CalendarEventID, V=21 Priority, W=22 Tags,
 // X=23 LastActionAt, Y=24 ProjectID, Z=25 OnHoldSince
-function parseTaskRow_(row, memberMap, now) {
+function parseTaskRow_(row, memberMap, now, checklistSummary) {
   now = now || new Date();
   var dl = row[COL.DEADLINE] ? new Date(row[COL.DEADLINE]) : null;
   var hoursL = dl ? (dl - now) / 3600000 : 999;
@@ -649,6 +701,7 @@ function parseTaskRow_(row, memberMap, now) {
   var rawTags = row[COL.TAGS] || '';
   var isRecurring = rawTags ? rawTags.split(',').some(function (t) { return t.trim() === '__recurring'; }) : false;
   var tags = rawTags ? rawTags.split(',').map(function (t) { return String(t).trim(); }).filter(function (t) { return t && t !== '__recurring'; }).join(',') : '';
+  var checklist = checklistSummary && row[COL.TASK_ID] ? (checklistSummary[row[COL.TASK_ID]] || null) : null;
   return {
     taskId: row[COL.TASK_ID] || '',
     taskName: row[COL.TASK_NAME] || '',
@@ -676,7 +729,9 @@ function parseTaskRow_(row, memberMap, now) {
     hoursLeft: hoursL.toFixed(1),
     isOverdue: hoursL < 0,
     ownerPhone: ownerM ? (ownerM.phone || '') : '',
-    isRecurring: isRecurring
+    isRecurring: isRecurring,
+    checklistDone: checklist ? checklist.done : 0,
+    checklistTotal: checklist ? checklist.total : 0
   };
 }
 

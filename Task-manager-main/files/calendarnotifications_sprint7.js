@@ -121,7 +121,7 @@ function buildEmailHtml_(accentColor, label, bodyHtml) {
     '<div class="hdr-label">' + label + '</div>' +
     '</div>' +
     '<div class="body">' + bodyHtml +
-    '<div style="margin-top:24px;"><a href="' + ScriptApp.getService().getUrl() + '" class="btn" style="text-decoration:none; color:#ffffff !important;">Open TaskFlow</a></div>' +
+    '<div style="margin-top:24px;"><a href="' + ScriptApp.getService().getUrl() + '" class="btn" style="text-decoration:none; color:#ffffff !important; display:inline-block; background:' + accentColor + '; padding:11px 24px; border-radius:4px; font-weight:700;"><span style="color:#ffffff;">Open TaskFlow</span></a></div>' +
     '</div>' +
     '<div class="footer">This is an automated message from TaskFlow &mdash; do not reply.</div>' +
     '</div></body></html>';
@@ -148,18 +148,19 @@ function fmtDate_(d) {
 function sendTaskAssignmentEmail(assignee, taskId, taskName, createdBy, deadline) {
   try {
     var subject = '[TaskFlow] New Task Assigned — ' + taskName;
-    var body = buildEmailHtml_(BRAND.blue, 'New Task Assigned',
+    subject = '[TaskFlow] Task Created - ' + taskName;
+    var body = buildEmailHtml_(BRAND.blue, 'Task Created',
       '<p class="greeting">Hi ' + (assignee.name || 'there') + ',</p>' +
-      '<p style="font-size:14px;color:' + BRAND.dark + ';">A new task has been assigned to you and is awaiting your action.</p>' +
+      '<p style="font-size:14px;color:' + BRAND.dark + ';">A new task has been created for you and is awaiting your action.</p>' +
       '<div class="card">' +
       row_('Task ID', taskId) +
       row_('Task', taskName) +
-      row_('Assigned by', createdBy) +
+      row_('Created by', createdBy) +
       row_('Deadline', fmtDate_(deadline)) +
       '</div>' +
       '<p class="note">Please log in to TaskFlow to view the full task details and begin work.</p>'
     );
-    GmailApp.sendEmail(assignee.email, subject, 'New task assigned: ' + taskName, { htmlBody: body });
+    GmailApp.sendEmail(assignee.email, subject, 'Task created: ' + taskName, { htmlBody: body });
   } catch (e) { console.warn('sendTaskAssignmentEmail failed: ' + e.message); }
 }
 

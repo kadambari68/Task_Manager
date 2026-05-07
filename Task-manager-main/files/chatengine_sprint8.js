@@ -345,11 +345,13 @@ function getMessages(ctxType, ctxId, afterTs) {
 function emitSystemMessage_(ctxType, ctxId, text, meta) {
   try {
     var sheet = ensureChatSheet_();
+    var cleanText = sanitize_(text || '');
+    cleanText = cleanText.replace(/^.*?(TASK-\S+)\s+assigned to\s+(.+)\s+by\s+(.+)$/, '$1 created for $2 by $3');
     sheet.appendRow([
       generateLogId('SYSMSG'),
       ctxType,
       ctxId,
-      sanitize_(text || ''),
+      cleanText,
       'system@taskflow',
       'System',
       new Date().toISOString(),

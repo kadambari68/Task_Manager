@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>/ — graphify tree viewer</title>
+  <style>
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      margin: 0;
+      padding: 0;
+      background: #f9f9f9;
+      color: #333;
+    }
+    h1 {
+      margin: 20px 0 0 24px;
+      font-size: 2.2rem;
+      font-weight: bold;
+      color: #1e3a56;
+    }
+    .controls {
+      margin: 20px 0 15px 24px;
+    }
+    button {
+      margin-right: 10px;
+      padding: 8px 18px;
+      background: #007bff;
+      color: #fff;
+      border: none;
+      border-radius: 5px;
+      font-size: 0.95rem;
+      cursor: pointer;
+      transition: background 0.2s ease-in-out;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    button:hover {
+      background: #0056b3;
+    }
+    button:active {
+      background: #004085;
+    }
+    #tree-container {
+      width: calc(100vw - 48px); /* Adjust for body margin/padding */
+      height: 85vh;
+      overflow: auto;
+      border-radius: 8px;
+      background: #fff;
+      margin-left: 24px;
+      margin-right: 24px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+      border: 1px solid #ddd;
+    }
+    svg {
+      background: #fff;
+      border-radius: 8px;
+      display: block; /* Important for D3 */
+    }
+    .node circle {
+      stroke-width: 2.5px;
+    }
+    .node text { /* Base style for the <text> container */
+      font: 13px 'Segoe UI', sans-serif;
+      paint-order: stroke fill; /* Ensures text is readable over lines */
+      stroke: #fff; /* White halo */
+      stroke-width: 3px; /* Halo thickness */
+      stroke-linejoin: round;
+      stroke-opacity: 0.85; /* Halo opacity */
+    }
+    .link {
+      fill: none;
+      stroke-opacity: 0.7;
+      stroke-width: 2px;
+    }
+  </style>
+</head>
+<body>
+  <h1>/ — Knowledge Graph</h1>
+  <div class="controls">
+    <button onclick="expandAll()">Expand All</button>
+    <button onclick="collapseAll()">Collapse All</button>
+    <button onclick="resetView()">Reset View</button>
+  </div>
+  <div id="tree-container">
+    <svg id="tree-svg" width="6000" height="8000"></svg>
+  </div>
+
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <script>
+    const initialJsonData = {"name":"/","total_count":206,"children":[{"name":"10_backendaddons_sprint7.js","total_count":25,"children":[{"name":"addComment()","total_count":1,"children":[]},{"name":"attachFilesToTask()","total_count":1,"children":[]},{"name":"bytesToHex_()","total_count":1,"children":[]},{"name":"computeAttachmentChecksum_()","total_count":1,"children":[]},{"name":"ensureAttachmentSheet_()","total_count":1,"children":[]},{"name":"escalateTaskToDeptManager()","total_count":1,"children":[]},{"name":"escalateTaskToHodDesk()","total_count":1,"children":[]},{"name":"generateAttachmentId_()","total_count":1,"children":[]},{"name":"getAttachmentRowsForTask_()","total_count":1,"children":[]},{"name":"getComments()","total_count":1,"children":[]},{"name":"getCommentSheet_()","total_count":1,"children":[]},{"name":"getDeptManagerForTeam_()","total_count":1,"children":[]},{"name":"getMemberPhone_()","total_count":1,"children":[]},{"name":"getOrCreateAttachmentRoot_()","total_count":1,"children":[]},{"name":"getOrCreateTaskFolder_()","total_count":1,"children":[]},{"name":"getTaskAttachments()","total_count":1,"children":[]},{"name":"listTaskAttachments_()","total_count":1,"children":[]},{"name":"normalizeAttachmentName_()","total_count":1,"children":[]},{"name":"parseAttachmentRow_()","total_count":1,"children":[]},{"name":"saveTaskAttachments_()","total_count":1,"children":[]},{"name":"sendTaskEscalationEmail_()","total_count":1,"children":[]},{"name":"setupAddons()","total_count":1,"children":[]},{"name":"setupAttachmentsSheet()","total_count":1,"children":[]},{"name":"setupAttachmentsSystem()","total_count":1,"children":[]},{"name":"uploadTaskFiles()","total_count":1,"children":[]}]},{"name":"analyticsengine_sprint8.js","total_count":20,"children":[{"name":"aggregateTasks_()","total_count":1,"children":[]},{"name":"dashCacheKey_()","total_count":1,"children":[]},{"name":"dashSummaryPayload_()","total_count":1,"children":[]},{"name":"generateUserInsights_()","total_count":1,"children":[]},{"name":"getAnalyticsDashboard()","total_count":1,"children":[]},{"name":"getDashboardSummary_()","total_count":1,"children":[]},{"name":"getGoalProgressStats_()","total_count":1,"children":[]},{"name":"getPriorityBreakdown_()","total_count":1,"children":[]},{"name":"getProjectHandoffDetails_()","total_count":1,"children":[]},{"name":"getProjectOverview_()","total_count":1,"children":[]},{"name":"getTaskTrendData_()","total_count":1,"children":[]},{"name":"getTeamKpis_()","total_count":1,"children":[]},{"name":"getTeamPerformanceStats_()","total_count":1,"children":[]},{"name":"getUserPerformanceStats_()","total_count":1,"children":[]},{"name":"getUserTaskReport_()","total_count":1,"children":[]},{"name":"getWorkloadDistribution_()","total_count":1,"children":[]},{"name":"invalidateDashCache_()","total_count":1,"children":[]},{"name":"isRecurringRow_()","total_count":1,"children":[]},{"name":"putDashCacheSafely_()","total_count":1,"children":[]},{"name":"warmDashCache()","total_count":1,"children":[]}]},{"name":"calendarnotifications_sprint7.js","total_count":19,"children":[{"name":"buildEmailHtml_()","total_count":1,"children":[]},{"name":"createCalendarEvent()","total_count":1,"children":[]},{"name":"fmtDate_()","total_count":1,"children":[]},{"name":"getCalendarEventId()","total_count":1,"children":[]},{"name":"row_()","total_count":1,"children":[]},{"name":"sendCommentNotificationEmail()","total_count":1,"children":[]},{"name":"sendEscalationEmail()","total_count":1,"children":[]},{"name":"sendFirmReminderEmail()","total_count":1,"children":[]},{"name":"sendGentleReminderEmail()","total_count":1,"children":[]},{"name":"sendIdleAlertEmail_()","total_count":1,"children":[]},{"name":"sendOverdueOwnerEmail_()","total_count":1,"children":[]},{"name":"sendRecurringReminderEmail_()","total_count":1,"children":[]},{"name":"sendSLARiskEmail_()","total_count":1,"children":[]},{"name":"sendTaskAssignmentEmail()","total_count":1,"children":[]},{"name":"sendTaskCompletedEmail()","total_count":1,"children":[]},{"name":"sendTaskRoutedEmail()","total_count":1,"children":[]},{"name":"sendUserReminderEmail_()","total_count":1,"children":[]},{"name":"storeCalendarEventId()","total_count":1,"children":[]},{"name":"transferCalendarEvent()","total_count":1,"children":[]}]},{"name":"chatengine_sprint8.js","total_count":18,"children":[{"name":"canAccessChatContext_()","total_count":1,"children":[]},{"name":"canAccessChatSpace_()","total_count":1,"children":[]},{"name":"canDeleteChatMessage_()","total_count":1,"children":[]},{"name":"createManagerChatSpace()","total_count":1,"children":[]},{"name":"deleteChatMessage()","total_count":1,"children":[]},{"name":"emitSystemMessage_()","total_count":1,"children":[]},{"name":"ensureChatSheet_()","total_count":1,"children":[]},{"name":"ensureChatSpacesSheet_()","total_count":1,"children":[]},{"name":"findChatMessageRow_()","total_count":1,"children":[]},{"name":"getAccessibleChatSpaces()","total_count":1,"children":[]},{"name":"getAllChatSpaces_()","total_count":1,"children":[]},{"name":"getChatSpaceById_()","total_count":1,"children":[]},{"name":"getMessages()","total_count":1,"children":[]},{"name":"parseChatSpaceRow_()","total_count":1,"children":[]},{"name":"parseJsonArray_()","total_count":1,"children":[]},{"name":"postMessage()","total_count":1,"children":[]},{"name":"setupChatSheet()","total_count":1,"children":[]},{"name":"uniqueEmails_()","total_count":1,"children":[]}]},{"name":"Code_sprint8_final.js","total_count":42,"children":[{"name":"bootstrapApp()","total_count":1,"children":[]},{"name":"buildTaskIndex_()","total_count":1,"children":[]},{"name":"canActorAccessTaskRow_()","total_count":1,"children":[]},{"name":"canActorAssignTarget_()","total_count":1,"children":[]},{"name":"canActorCommentOnTask_()","total_count":1,"children":[]},{"name":"canTransition_()","total_count":1,"children":[]},{"name":"doGet()","total_count":1,"children":[]},{"name":"emitEvent_()","total_count":1,"children":[]},{"name":"err_()","total_count":1,"children":[]},{"name":"findTaskRow_()","total_count":1,"children":[]},{"name":"generateLogId()","total_count":1,"children":[]},{"name":"generateTaskId()","total_count":1,"children":[]},{"name":"getActiveMembers_()","total_count":1,"children":[]},{"name":"getAllTasksAdmin()","total_count":1,"children":[]},{"name":"getAllTeams_()","total_count":1,"children":[]},{"name":"getCurrentUser()","total_count":1,"children":[]},{"name":"getLastHandoffTime()","total_count":1,"children":[]},{"name":"getMemberByEmail_()","total_count":1,"children":[]},{"name":"getMemberMap_()","total_count":1,"children":[]},{"name":"getMyCreatedTasks()","total_count":1,"children":[]},{"name":"getProjectStatusMap_()","total_count":1,"children":[]},{"name":"getSheet()","total_count":1,"children":[]},{"name":"getSLAConfig_()","total_count":1,"children":[]},{"name":"getSLAConfigRows()","total_count":1,"children":[]},{"name":"getTaskPage_()","total_count":1,"children":[]},{"name":"getTasksForCurrentUser()","total_count":1,"children":[]},{"name":"getTaskTimeline()","total_count":1,"children":[]},{"name":"getTaskTypes_()","total_count":1,"children":[]},{"name":"getTeamMembers()","total_count":1,"children":[]},{"name":"installTriggers()","total_count":1,"children":[]},{"name":"invalidateMemberCache_()","total_count":1,"children":[]},{"name":"invalidateTaskIndex_()","total_count":1,"children":[]},{"name":"isAdmin()","total_count":1,"children":[]},{"name":"isAdminEmail()","total_count":1,"children":[]},{"name":"migrateStatusValues()","total_count":1,"children":[]},{"name":"migrateTaskHomeTeamFromEvents()","total_count":1,"children":[]},{"name":"ok_()","total_count":1,"children":[]},{"name":"parseTaskRow_()","total_count":1,"children":[]},{"name":"requireRole_()","total_count":1,"children":[]},{"name":"sanitize_()","total_count":1,"children":[]},{"name":"setupUserRemindersSheet()","total_count":1,"children":[]},{"name":"withScriptLock_()","total_count":1,"children":[]}]},{"name":"goalsengine_sprint7.js","total_count":9,"children":[{"name":"canActorManageGoal_()","total_count":1,"children":[]},{"name":"createGoal()","total_count":1,"children":[]},{"name":"deleteGoal()","total_count":1,"children":[]},{"name":"generateGoalId_()","total_count":1,"children":[]},{"name":"getGoalProgress()","total_count":1,"children":[]},{"name":"getGoalSheet_()","total_count":1,"children":[]},{"name":"normalizeGoalScope_()","total_count":1,"children":[]},{"name":"setupGoalsSheet()","total_count":1,"children":[]},{"name":"updateGoal()","total_count":1,"children":[]}]},{"name":"projectengine_sprint7.js","total_count":11,"children":[{"name":"archiveProject()","total_count":1,"children":[]},{"name":"canActorAccessProjectRow_()","total_count":1,"children":[]},{"name":"createProject()","total_count":1,"children":[]},{"name":"deleteProject()","total_count":1,"children":[]},{"name":"findProjectRow_()","total_count":1,"children":[]},{"name":"getProjectsForUser()","total_count":1,"children":[]},{"name":"getProjectsPayload_()","total_count":1,"children":[]},{"name":"getProjectTasks()","total_count":1,"children":[]},{"name":"getProjSheet_()","total_count":1,"children":[]},{"name":"setupProjectsSheet()","total_count":1,"children":[]},{"name":"updateProject()","total_count":1,"children":[]}]},{"name":"recurringtasksengine_sprint7.js","total_count":23,"children":[{"name":"advanceMonths_()","total_count":1,"children":[]},{"name":"buildRecurringSourceTaskMap_()","total_count":1,"children":[]},{"name":"calculateNextTriggerDate_()","total_count":1,"children":[]},{"name":"createRecurringTask()","total_count":1,"children":[]},{"name":"deleteRecurringTask()","total_count":1,"children":[]},{"name":"ensureRecurringSourceTaskColumn_()","total_count":1,"children":[]},{"name":"findRecRow_()","total_count":1,"children":[]},{"name":"generateRecId_()","total_count":1,"children":[]},{"name":"getRecSheet_()","total_count":1,"children":[]},{"name":"getRecurringTasks()","total_count":1,"children":[]},{"name":"isRecurringSourceReminderEligible_()","total_count":1,"children":[]},{"name":"pauseRecurringTask()","total_count":1,"children":[]},{"name":"recurringLegacyKey_()","total_count":1,"children":[]},{"name":"recurringTaskHasSourceTag_()","total_count":1,"children":[]},{"name":"resolveRecurringSourceTask_()","total_count":1,"children":[]},{"name":"resumeRecurringTask()","total_count":1,"children":[]},{"name":"runRecurringReminderEngine_()","total_count":1,"children":[]},{"name":"setRecurringStatus_()","total_count":1,"children":[]},{"name":"setupRecurringTasksSheet()","total_count":1,"children":[]},{"name":"setupRecurringTasksSheet_Internal_()","total_count":1,"children":[]},{"name":"toDateStr_()","total_count":1,"children":[]},{"name":"toDateStrSafe_()","total_count":1,"children":[]},{"name":"updateRecurringTask()","total_count":1,"children":[]}]},{"name":"reminderengine_sprint7.js","total_count":17,"children":[{"name":"buildAtRiskAlertedSet_()","total_count":1,"children":[]},{"name":"buildBasicWeeklyMetrics_()","total_count":1,"children":[]},{"name":"buildDigestHtml_()","total_count":1,"children":[]},{"name":"buildIdleAlertedSet_()","total_count":1,"children":[]},{"name":"checkIdleTasks_()","total_count":1,"children":[]},{"name":"checkSLARisk_()","total_count":1,"children":[]},{"name":"cleanupOldReminders_()","total_count":1,"children":[]},{"name":"getOwnerEmail_()","total_count":1,"children":[]},{"name":"getTeamManagerEmail_()","total_count":1,"children":[]},{"name":"kpiBox_()","total_count":1,"children":[]},{"name":"logReminder_()","total_count":1,"children":[]},{"name":"runDailyReminderEngine()","total_count":1,"children":[]},{"name":"runHourlyEngine()","total_count":1,"children":[]},{"name":"runUserReminderEngine_()","total_count":1,"children":[]},{"name":"sendWeeklyDigest()","total_count":1,"children":[]},{"name":"updateReminderFields_()","total_count":1,"children":[]},{"name":"wasReminderSentToday_()","total_count":1,"children":[]}]},{"name":"taskengine_final.js","total_count":21,"children":[{"name":"archiveTask()","total_count":1,"children":[]},{"name":"changeStatus()","total_count":1,"children":[]},{"name":"completeTask()","total_count":1,"children":[]},{"name":"createRecurringFromTask_()","total_count":1,"children":[]},{"name":"createTask()","total_count":1,"children":[]},{"name":"deleteUserReminder()","total_count":1,"children":[]},{"name":"finalizeTask_()","total_count":1,"children":[]},{"name":"getLastStatusEventForTask_()","total_count":1,"children":[]},{"name":"getMyTasks()","total_count":1,"children":[]},{"name":"getUserReminders()","total_count":1,"children":[]},{"name":"hasRecurringTag_()","total_count":1,"children":[]},{"name":"isRecurringTaskRow_()","total_count":1,"children":[]},{"name":"parseDateOnly_()","total_count":1,"children":[]},{"name":"reopenTask()","total_count":1,"children":[]},{"name":"restartTask()","total_count":1,"children":[]},{"name":"reverseLastStatusChange()","total_count":1,"children":[]},{"name":"routeTask()","total_count":1,"children":[]},{"name":"setUserReminder()","total_count":1,"children":[]},{"name":"syncRecurringStatusWithTask_()","total_count":1,"children":[]},{"name":"transitionTask_()","total_count":1,"children":[]},{"name":"updateTaskDetails()","total_count":1,"children":[]}]},{"name":"11_notificationengine_sprint10.js","total_count":1,"children":[]}]};
+
+    function transformData(jsonData) {
+        // Helper function to recursively build the children structure
+        function processNode(node, parentL1StageName) {
+            let displayName = node.name;
+            // Append total_count if it exists and is not already in the name
+            if (node.total_count !== undefined) {
+                if (!/\(Total Count: \d+\)$/.test(displayName)) {
+                    displayName += ` (Total Count: ${node.total_count})`;
+                }
+            }
+
+            const newNode = { name: displayName };
+
+            if (parentL1StageName === "Root") {
+                 newNode.originalStageName = node.name;
+            } else {
+                newNode.originalStageName = parentL1StageName;
+            }
+
+            if (node.children && node.children.length > 0) {
+                const stageNameToPass = (parentL1StageName === "Root") ? node.name : parentL1StageName;
+                newNode.children = node.children.map(child => processNode(child, stageNameToPass));
+            }
+
+            return newNode;
+        }
+
+        let rootDisplayName = jsonData.name;
+        if (jsonData.total_count !== undefined && !/\(Total Count: \d+\)$/.test(rootDisplayName)) {
+            rootDisplayName += ` (Total Count: ${jsonData.total_count})`;
+        }
+
+        return {
+            name: rootDisplayName,
+            originalStageName: "Root",
+            children: (jsonData.children || []).map(child => processNode(child, "Root"))
+        };
+    }
+
+    const treeData = transformData(initialJsonData);
+
+    // Auto-populated phaseColors: every depth-1 child of the root gets
+    // a stable colour from a bigger palette so all top-level dirs are
+    // distinguishable.
+    const PALETTE = [
+      ["#3498DB","#2980B9","#AED6F1"], ["#2ECC71","#27AE60","#A9DFBF"],
+      ["#E74C3C","#C0392B","#F5B7B1"], ["#9B59B6","#8E44AD","#D7BDE2"],
+      ["#F39C12","#D68910","#FAD7A0"], ["#1ABC9C","#117864","#A2D9CE"],
+      ["#34495E","#1B2631","#ABB2B9"], ["#E67E22","#BA4A00","#F5CBA7"],
+      ["#16A085","#0E6655","#A2D9CE"], ["#D35400","#A04000","#EDBB99"],
+      ["#7F8C8D","#566573","#D5DBDB"], ["#C0392B","#7B241C","#F5B7B1"],
+      ["#2E86C1","#1B4F72","#A9CCE3"], ["#28B463","#196F3D","#A9DFBF"],
+      ["#AF7AC5","#6C3483","#D2B4DE"],
+    ];
+    const phaseColors = { "Root": { fill: "#4A4A4A", stroke: "#333333", collapsedFill: "#6C757D" },
+                          "Default": { fill: "#BDC3C7", stroke: "#95A5A6", collapsedFill: "#ECF0F1" } };
+    (initialJsonData.children || []).forEach((c, i) => {
+      const pal = PALETTE[i % PALETTE.length];
+      phaseColors[c.name] = { fill: pal[0], stroke: pal[1], collapsedFill: pal[2] };
+    });
+
+    const levelSpecificPalettes = {
+      0: { fill: "#4A4A4A", stroke: "#333333", collapsedFill: "#6C757D" },
+      2: { fill: "#6ab04c", stroke: "#508a38", collapsedFill: "#a3d391" },
+      3: { fill: "#f0932b", stroke: "#d0730f", collapsedFill: "#f6c07e" },
+      4: { fill: "#be2edd", stroke: "#a01cb3", collapsedFill: "#e08bf2" },
+      5: { fill: "#00a8ff", stroke: "#007ac1", collapsedFill: "#74d2ff" },
+      6: { fill: "#e55039", stroke: "#c23620", collapsedFill: "#f09a8d" },
+      default: { fill: "#747d8c", stroke: "#57606f", collapsedFill: "#a4b0be" }
+    };
+
+    const svgElement = d3.select("#tree-svg");
+    const initialSvgWidth = +svgElement.attr("width");
+    const initialSvgHeight = +svgElement.attr("height");
+    const margin = { top: 40, right: 120, bottom: 80, left: 450 };
+    let width = initialSvgWidth - margin.left - margin.right;
+    let height = initialSvgHeight - margin.top - margin.bottom;
+    const duration = 500;
+    let nodeCounter = 0;
+    const g = svgElement.append("g").attr("transform", `translate(${margin.left},${margin.top})`);
+    const treemap = d3.tree().nodeSize([40, 0]);
+    let rootNode = d3.hierarchy(treeData, d => d.children);
+    rootNode.x0 = 0;
+    rootNode.y0 = 0;
+
+    if (rootNode.children) {
+      rootNode.children.forEach(d_child => {
+        if (d_child.children) { collapseBranch(d_child); }
+      });
+    }
+    updateTree(rootNode);
+
+    function collapseBranch(d) { if (d.children) { d._children = d.children; d._children.forEach(collapseBranch); d.children = null; } }
+    function expandBranch(d) { if (d._children) { d.children = d._children; d._children = null; } if (d.children) { d.children.forEach(expandBranch); } }
+    window.expandAll = () => { expandBranch(rootNode); updateTree(rootNode); };
+    window.collapseAll = () => { if (rootNode.children) { rootNode.children.forEach(collapseBranch); } updateTree(rootNode); };
+    window.resetView = () => { if (rootNode.children) { rootNode.children.forEach(d_child => { if (d_child.children || d_child._children) { collapseBranch(d_child); } }); } if (rootNode._children && !rootNode.children) { rootNode.children = rootNode._children; rootNode._children = null; } updateTree(rootNode); };
+
+    function updateTree(source) {
+      const treeLayoutData = treemap(rootNode);
+      let nodes = treeLayoutData.descendants();
+      let links = treeLayoutData.descendants().slice(1);
+
+      let minX = 0;
+      let maxX = 0;
+      if (nodes.length > 0) {
+        minX = d3.min(nodes, d => d.x);
+        maxX = d3.max(nodes, d => d.x);
+      }
+
+      let neededHeight = Math.max(initialSvgHeight, maxX - minX + margin.top + margin.bottom + 100);
+      svgElement.transition().duration(duration / 2).attr("height", neededHeight);
+      g.transition().duration(duration / 2).attr("transform", `translate(${margin.left},${margin.top - minX + 40})`);
+
+      nodes.forEach(d => { d.y = d.depth * 400; }); // Adjust horizontal separation if needed
+
+      const node = g.selectAll('g.node').data(nodes, d => d.id || (d.id = ++nodeCounter));
+      const nodeEnter = node.enter().append('g')
+        .attr('class', d => "node" + (d.children || d._children ? " node--internal" : " node--leaf") + (d._children ? " _children" : ""))
+        .attr('transform', d => `translate(${source.y0},${source.x0})`)
+        .on('click', (event, d) => { if (d.children) { d._children = d.children; d.children = null; } else if (d._children) { d.children = d._children; d._children = null; } updateTree(d); })
+        .style('cursor', d => (d.children || d._children) ? 'pointer' : 'default');
+
+      nodeEnter.append('circle').attr('r', 1e-6);
+
+      nodeEnter.append('text')
+        .attr('dy', '.35em')
+        .attr('x', d => d.children || d._children ? -14 : 14)
+        .attr('text-anchor', d => d.children || d._children ? 'end' : 'start')
+        .style("fill-opacity", 1e-6)
+        .call(wrapText, 380);
+
+      const nodeUpdate = nodeEnter.merge(node);
+      nodeUpdate.transition().duration(duration)
+        .attr('transform', d => `translate(${d.y},${d.x})`)
+        .attr('class', d => "node" + (d.children ? " node--internal" : " node--leaf") + (d._children ? " node--internal _children" : ""));
+
+      nodeUpdate.select('circle').attr('r', 8.5)
+        .style('fill', d => {
+            let palette;
+            if (d.depth === 0) {
+                palette = levelSpecificPalettes[0];
+            } else if (d.depth === 1) {
+                palette = phaseColors[d.data.originalStageName] || phaseColors.Default;
+            } else {
+                palette = levelSpecificPalettes[d.depth] || levelSpecificPalettes.default;
+            }
+            if (d._children) return palette.collapsedFill;
+            if (d.children) return palette.fill;
+            return "#fff";
+        })
+        .style('stroke', d => {
+            let palette;
+            if (d.depth === 0) {
+                palette = levelSpecificPalettes[0];
+            } else if (d.depth === 1) {
+                palette = phaseColors[d.data.originalStageName] || phaseColors.Default;
+            } else {
+                palette = levelSpecificPalettes[d.depth] || levelSpecificPalettes.default;
+            }
+            return palette.stroke;
+        });
+      nodeUpdate.select('text').style("fill-opacity", 1).call(wrapText, 380);
+
+      const nodeExit = node.exit().transition().duration(duration).attr('transform', d => `translate(${source.y},${source.x})`).remove();
+      nodeExit.select('circle').attr('r', 1e-6);
+      nodeExit.select('text').style('fill-opacity', 1e-6);
+
+      const link = g.selectAll('path.link').data(links, d => d.id);
+      const linkEnter = link.enter().insert('path', "g").attr('class', 'link').attr('d', d => { const o = { x: source.x0, y: source.y0 }; return diagonal(o, o); });
+
+      linkEnter.merge(link).transition().duration(duration).attr('d', d => diagonal(d, d.parent))
+        .style('stroke', d => {
+            const sourceNode = d.parent;
+            if (!sourceNode) return phaseColors.Default.stroke;
+            const l1AncestorName = sourceNode.data.originalStageName;
+            const colorPalette = phaseColors[l1AncestorName] || phaseColors.Default;
+            return colorPalette.stroke;
+        });
+      link.exit().transition().duration(duration).attr('d', d => { const o = { x: source.x, y: source.y }; return diagonal(o, o); }).remove();
+      nodes.forEach(d => { d.x0 = d.x; d.y0 = d.y; });
+    }
+
+    function diagonal(s, d) { return `M ${s.y} ${s.x} C ${(s.y + d.y) / 2} ${s.x}, ${(s.y + d.y) / 2} ${d.x}, ${d.y} ${d.x}`; }
+
+    function wrapText(textElements, maxWidth) {
+        const textPartColors = {
+            name: '#343a40',
+            count: '#0056b3'
+        };
+        const countRegex = /(\s\(Total Count: \d+\))$/;
+
+        textElements.each(function () {
+            const textD3 = d3.select(this);
+            const originalNodeText = textD3.datum().data.name;
+            const x = parseFloat(textD3.attr("x") || 0);
+            const initialDy = textD3.attr("dy");
+            const textAnchor = textD3.attr("text-anchor");
+            const lineHeight = 1.1;
+
+            textD3.text(null);
+
+            let namePart = originalNodeText;
+            let countPartText = "";
+
+            const countMatch = originalNodeText.match(countRegex);
+            if (countMatch && originalNodeText.endsWith(countMatch[0])) {
+                namePart = originalNodeText.substring(0, originalNodeText.length - countMatch[0].length).trim();
+                countPartText = countMatch[0].trim();
+            }
+
+            const tokens = [];
+            namePart.split(/\s+/).filter(Boolean).forEach(word => {
+                tokens.push({ text: word, type: 'name' });
+            });
+            if (countPartText) {
+                tokens.push({ text: countPartText, type: 'count' });
+            }
+
+            if (tokens.length === 0 && originalNodeText) {
+                tokens.push({ text: originalNodeText, type: 'name' });
+            }
+
+            let currentTspan = textD3.append("tspan").attr("x", x).attr("dy", initialDy);
+            if (textAnchor === "end") currentTspan.attr("text-anchor", "end");
+
+            let lineTokens = [];
+
+            for (let i = 0; i < tokens.length; i++) {
+                const tokenObj = tokens[i];
+
+                lineTokens.push(tokenObj);
+                currentTspan.text(lineTokens.map(t => t.text).join(" "));
+
+                if (currentTspan.node().getComputedTextLength() > maxWidth && lineTokens.length > 1) {
+                    lineTokens.pop();
+
+                    currentTspan.text(null);
+                    lineTokens.forEach((prevToken, idx) => {
+                        currentTspan.append("tspan")
+                            .text((idx > 0 ? " " : "") + prevToken.text)
+                            .style("fill", textPartColors[prevToken.type] || textPartColors.name)
+                            .style("font-weight", prevToken.type === 'count' ? "bold" : "normal");
+                    });
+
+                    lineTokens = [tokenObj];
+                    currentTspan = textD3.append("tspan").attr("x", x).attr("dy", lineHeight + "em");
+                    if (textAnchor === "end") currentTspan.attr("text-anchor", "end");
+                }
+            }
+
+            currentTspan.text(null);
+            lineTokens.forEach((token, idx) => {
+                currentTspan.append("tspan")
+                    .text((idx > 0 ? " " : "") + token.text)
+                    .style("fill", textPartColors[token.type] || textPartColors.name)
+                    .style("font-weight", token.type === 'count' ? "bold" : "normal");
+            });
+
+            if (textD3.selectAll("tspan > tspan").empty() && textD3.select("tspan").text().length === 0 && originalNodeText) {
+                let t = textD3.select("tspan");
+                let displayText = originalNodeText;
+                t.text(displayText).style("fill", textPartColors.name);
+                if (t.node() && t.node().getComputedTextLength() > maxWidth && displayText.length > 20) {
+                    let estimatedChars = Math.floor(maxWidth / (t.node().getComputedTextLength()/displayText.length) );
+                    displayText = displayText.substring(0, Math.max(0, estimatedChars - 3)) + "...";
+                    t.text(displayText);
+                }
+            }
+        });
+    }
+  </script>
+</body>
+</html>

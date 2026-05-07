@@ -13,6 +13,7 @@
 
 var GOALS_SHEET = 'Goals';
 var GOALS_COLS = 9; // Added CreatedBy column
+var GOAL_SCOPE_ALL = 'all';
 
 // ------------------------------------------------------------------
 // setupGoalsSheet
@@ -52,6 +53,50 @@ function generateGoalId_() {
   return 'GOAL-' + new Date().getFullYear() + '-' + String(Date.now()).slice(-5);
 }
 
+function normalizeGoalScope_(rawScope, actor) {
+  var raw = String(rawScope || GOAL_SCOPE_ALL).trim();
+  if (!raw || raw === 'Team') raw = GOAL_SCOPE_ALL;
+  var rawLower = raw.toLowerCase();
+
+  if (rawLower === GOAL_SCOPE_ALL) {
+    if (actor.role !== 'Owner') throw new Error('UNAUTHORIZED');
+    return GOAL_SCOPE_ALL;
+  }
+
+  if (rawLower.indexOf('t:') === 0) {
+    var teamIn = raw.substring(2).trim();
+    if (!teamIn) throw new Error('INVALID_INPUT');
+    var teams = getAllTeams_() || [];
+    var team = teams.find(function (t) {
+      return String(t.name || '').toLowerCase() === teamIn.toLowerCase();
+    });
+    if (!team) throw new Error('INVALID_INPUT');
+    if (actor.role === 'Manager' && String(team.name || '').toLowerCase() !== String(actor.team || '').toLowerCase()) throw new Error('UNAUTHORIZED');
+    return 't:' + team.name;
+  }
+
+  var email = rawLower.indexOf('m:') === 0 ? raw.substring(2) : raw;
+  email = String(email || '').toLowerCase().trim();
+  var member = getMemberByEmail_(email);
+  if (!member || member.active === false) throw new Error('INVALID_INPUT');
+  if (actor.role === 'Manager' && String(member.team || '').toLowerCase() !== String(actor.team || '').toLowerCase()) throw new Error('UNAUTHORIZED');
+  return 'm:' + member.email.toLowerCase();
+}
+
+function canActorManageGoal_(actor, row) {
+  if (actor.role === 'Owner') return true;
+  var scope = String(row[2] || '').toLowerCase().trim();
+  var creator = String(row[8] || '').toLowerCase().trim();
+  var actorEm = String(actor.email || '').toLowerCase();
+  if (creator === actorEm) return true;
+  if (scope.indexOf('t:') === 0) return scope.substring(2).toLowerCase() === String(actor.team || '').toLowerCase();
+  if (scope.indexOf('m:') === 0) {
+    var member = getMemberByEmail_(scope.substring(2));
+    return !!(member && String(member.team || '').toLowerCase() === String(actor.team || '').toLowerCase());
+  }
+  return false;
+}
+
 // ------------------------------------------------------------------
 // createGoal
 // Owner or Manager only.
@@ -69,7 +114,7 @@ function createGoal(goalData) {
     if (validMetrics.indexOf(metricType) === -1) return err_('INVALID_INPUT');
 
     var goalId = generateGoalId_();
-    var ownerEmail = clean.ownerEmail || 'Team';
+    var ownerEmail = normalizeGoalScope_(clean.ownerEmail, actor);
     var startDate = clean.startDate ? new Date(clean.startDate) : new Date();
     // Normalize startDate to beginning of day so tasks completed earlier today count
     startDate.setHours(0, 0, 0, 0);
@@ -104,6 +149,7 @@ function createGoal(goalData) {
 
   } catch (e) {
     if (e.message === 'UNAUTHORIZED') return err_('UNAUTHORIZED');
+    if (e.message === 'INVALID_INPUT') return err_('INVALID_INPUT');
     console.error('createGoal: ' + e.message);
     return err_('SYSTEM_ERROR');
   }
@@ -125,19 +171,18 @@ function updateGoal(goalId, updates) {
     for (var i = 1; i < data.length; i++) {
       if (data[i][0] !== goalId) continue;
 
-      // Manager can update if they are the owner OR they created it
-      var owner = (data[i][2] || '').toLowerCase();
-      var creator = (data[i][8] || '').toLowerCase();
-      var actorEm = actor.email.toLowerCase();
-
-      if (actor.role === 'Manager' && owner !== actorEm && creator !== actorEm) {
+      if (!canActorManageGoal_(actor, data[i])) {
         return err_('UNAUTHORIZED');
       }
 
       if (clean.goalName !== undefined) sheet.getRange(i + 1, 2).setValue(clean.goalName.trim() || data[i][1]);
-      if (clean.ownerEmail !== undefined) sheet.getRange(i + 1, 3).setValue(clean.ownerEmail || 'Team');
+      if (clean.ownerEmail !== undefined) sheet.getRange(i + 1, 3).setValue(normalizeGoalScope_(clean.ownerEmail, actor));
       if (clean.target !== undefined && Number(clean.target) > 0) sheet.getRange(i + 1, 4).setValue(Number(clean.target));
-      if (clean.metricType !== undefined) sheet.getRange(i + 1, 5).setValue(clean.metricType);
+      if (clean.metricType !== undefined) {
+        var validMetrics = ['tasksCompleted', 'tasksClosed'];
+        if (validMetrics.indexOf(clean.metricType) === -1) return err_('INVALID_INPUT');
+        sheet.getRange(i + 1, 5).setValue(clean.metricType);
+      }
       if (clean.startDate !== undefined) {
         var sd = new Date(clean.startDate); sd.setHours(0, 0, 0, 0);
         sheet.getRange(i + 1, 6).setValue(sd.toISOString());
@@ -156,6 +201,7 @@ function updateGoal(goalId, updates) {
 
   } catch (e) {
     if (e.message === 'UNAUTHORIZED') return err_('UNAUTHORIZED');
+    if (e.message === 'INVALID_INPUT') return err_('INVALID_INPUT');
     console.error('updateGoal: ' + e.message);
     return err_('SYSTEM_ERROR');
   }

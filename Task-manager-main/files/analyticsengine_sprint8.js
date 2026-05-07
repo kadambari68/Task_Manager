@@ -18,6 +18,36 @@ function dashCacheKey_(filters) {
   return 'dash_v' + version + '_' + (f.project || '') + '_' + (f.team || '') + '_' + (f.member || '') + '_' + (f.type || '') + '_' + (f.from || '') + '_' + (f.to || '');
 }
 
+function dashSummaryPayload_(payload) {
+  payload = payload || {};
+  return {
+    summary: payload.summary || {},
+    globalSummary: payload.globalSummary || {},
+    globalBottleneck: payload.globalBottleneck || {},
+    globalTeamStats: payload.globalTeamStats || {},
+    teamPerformance: payload.teamPerformance || [],
+    tasksByStatus: payload.tasksByStatus || { labels: [], data: [] },
+    goalProgress: payload.goalProgress || []
+  };
+}
+
+function putDashCacheSafely_(cache, cacheKey, payload, ttlSeconds) {
+  ttlSeconds = ttlSeconds || 300;
+  try {
+    var fullJson = JSON.stringify(payload || {});
+    if (fullJson.length < 90000) {
+      cache.put(cacheKey, fullJson, ttlSeconds);
+      return;
+    }
+
+    var summaryJson = JSON.stringify(dashSummaryPayload_(payload));
+    if (summaryJson.length < 90000) cache.put(cacheKey + '_summary', summaryJson, ttlSeconds);
+    console.warn('Dashboard payload too large for full cache, skipped: ' + fullJson.length + ' bytes');
+  } catch (e) {
+    console.warn('Dashboard cache skipped: ' + e.message);
+  }
+}
+
 // ------------------------------------------------------------------
 // SINGLE-PASS TASK AGGREGATOR
 // Returns raw buckets used by all sub-functions. Called once per
@@ -462,12 +492,12 @@ function getUserPerformanceStats_(agg) {
     var rate = total > 0 ? Math.round((u.completed / total) * 100) : 0;
     var avgTat = u.completed > 0 ? parseFloat((u.totalTAT / u.completed).toFixed(1)) : 0;
 
-    // Qualitative Labeling logic
-    var label = 'Normal';
-    if (avgTat > 0 && avgTat < 24 && u.active > 5) label = 'Fast response, high load';
-    else if (avgTat > 72) label = 'Slow response, needs attention';
-    else if (avgTat > 0 && avgTat < 24 && u.active <= 2) label = 'Very fast, low workload';
-    else if (u.active > 8) label = 'High capacity, steady';
+    // Neutral Labeling logic
+    var label = 'Regular Pace';
+    if (avgTat > 0 && avgTat < 24 && u.active > 5) label = 'Active & High Velocity';
+    else if (avgTat > 72) label = 'Complex / Long-term';
+    else if (avgTat > 0 && avgTat < 24 && u.active <= 2) label = 'Fast turnaround';
+    else if (u.active > 8) label = 'High capacity';
 
     return {
       email: email,
@@ -564,7 +594,7 @@ function getTaskTrendData_(agg) {
 // getGoalProgressStats_
 // Reads Goals sheet + computes actual from task metrics in agg
 // ------------------------------------------------------------------
-function getGoalProgressStats_() {
+function getGoalProgressStats_(actor) {
   try {
     var sheet = getSheet(SHEETS.GOALS);
     if (!sheet) return [];
@@ -584,7 +614,8 @@ function getGoalProgressStats_() {
       if (!row[0]) continue;
       var goalId = row[0];
       var goalName = row[1] || '';
-      var scope = (row[2] || '').toLowerCase().trim(); // m:email or t:team or all
+      var rawScope = String(row[2] || 'all').trim();
+      var scope = rawScope.toLowerCase(); // m:email or t:team or all
       var target = Number(row[3]) || 0;
       var metricType = row[4] || 'tasksCompleted';
       var startDate = row[5] ? new Date(row[5]) : null;
@@ -600,6 +631,16 @@ function getGoalProgressStats_() {
       var scopeID = '';
       if (scope.indexOf('t:') === 0) { scopeType = 'team'; scopeID = scope.substring(2); }
       else if (scope.indexOf('m:') === 0) { scopeType = 'member'; scopeID = scope.substring(2); }
+
+      if (actor && actor.role === 'Manager') {
+        var actorTeam = String(actor.team || '').toLowerCase();
+        if (scopeType === 'all') continue;
+        if (scopeType === 'team' && scopeID !== actorTeam) continue;
+        if (scopeType === 'member') {
+          var goalMember = getMemberByEmail_(scopeID);
+          if (!goalMember || String(goalMember.team || '').toLowerCase() !== actorTeam) continue;
+        }
+      }
 
       for (var j = 1; j < allTasks.length; j++) {
         var tRow = allTasks[j];
@@ -635,8 +676,8 @@ function getGoalProgressStats_() {
       var status = pct >= 100 ? 'Achieved' : (daysLeft !== null && daysLeft < 0) ? 'Overdue' : 'In Progress';
 
       out.push({
-        goalId: goalId, goalName: goalName, ownerEmail: scope, target: target, actual: actual, pct: pct,
-        metricType: metricType, daysLeft: daysLeft, status: status, description: desc,
+        goalId: goalId, goalName: goalName, ownerEmail: rawScope || 'all', target: target, actual: actual, pct: pct,
+        metricType: metricType, daysLeft: daysLeft, status: status, description: desc, scopeType: scopeType, scopeId: scopeID,
         startDate: startDate ? startDate.toISOString() : '', endDate: endDate ? endDate.toISOString() : ''
       });
     }
@@ -694,7 +735,7 @@ function getAnalyticsDashboard(filters) {
       userTaskReport: getUserTaskReport_(agg),
       teamPerformance: teamPerformance,
       teamKpis: getTeamKpis_(agg),
-      goalProgress: getGoalProgressStats_(),
+      goalProgress: getGoalProgressStats_(actor),
       workloadDistribution: getWorkloadDistribution_(agg),
       taskTrend: getTaskTrendData_(agg),
       stuckTasks: (agg.detailedTasks || []).filter(function (t) { return t.isStuck; }).sort(function (a, b) { return b.overdueHrs - a.overdueHrs; }).slice(0, 5),
@@ -705,7 +746,7 @@ function getAnalyticsDashboard(filters) {
     };
 
     // Cache for 5 minutes — heavy enough to be worth it
-    try { cache.put(cacheKey, JSON.stringify(payload), 300); } catch (e) { }
+    putDashCacheSafely_(cache, cacheKey, payload, 300);
 
     return ok_(payload);
 
@@ -1009,7 +1050,7 @@ function warmDashCache() {
 
     // Only recompute if cache is already expired or nearly expired (< 60s left)
     try {
-      var existing = cache.get(cacheKey);
+      var existing = cache.get(cacheKey) || cache.get(cacheKey + '_summary');
       if (existing) {
         console.log('warmDashCache: cache still warm, skipping recompute');
         return;
@@ -1045,7 +1086,7 @@ function warmDashCache() {
       projectHandoffs: agg.projectHandoffs
     };
 
-    try { cache.put(cacheKey, JSON.stringify(payload), 300); } catch (e) { }
+    putDashCacheSafely_(cache, cacheKey, payload, 300);
     console.log('warmDashCache: recomputed at ' + now.toISOString());
 
   } catch (e) {

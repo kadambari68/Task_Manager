@@ -23,7 +23,7 @@
 //   6  Frequency       7  IntervalValue  8  IntervalUnit
 //   9  NextTriggerDate 10 ReminderTime   11 StartDate
 //   12 EndDate         13 CreatedBy      14 CreatedAt
-//   15 Status
+//   15 Status          16 SourceTaskId
 //
 // Frequency constants: DAILY | WEEKLY | MONTHLY | YEARLY | CUSTOM
 // Status constants:    ACTIVE | PAUSED
@@ -45,7 +45,8 @@ var REC_COL = {
   END_DATE: 12,
   CREATED_BY: 13,
   CREATED_AT: 14,
-  STATUS: 15
+  STATUS: 15,
+  SOURCE_TASK_ID: 16
 };
 
 var REC_FREQ = { DAILY: 'DAILY', WEEKLY: 'WEEKLY', MONTHLY: 'MONTHLY', YEARLY: 'YEARLY', CUSTOM: 'CUSTOM' };
@@ -59,7 +60,7 @@ var VALID_UNITS = ['DAY', 'WEEK', 'MONTH', 'YEAR'];
 
 function getRecSheet_() {
   var sh = getSheet(SHEETS.RECURRING_TASKS);
-  if (sh) return sh;
+  if (sh) return ensureRecurringSourceTaskColumn_(sh);
 
   // Sheet missing -- create it gracefully instead of throwing.
   return setupRecurringTasksSheet_Internal_();
@@ -97,20 +98,29 @@ function setupRecurringTasksSheet_Internal_() {
         'RecurringID', 'Title', 'Description', 'AssigneeEmail',
         'AssigneeName', 'Team', 'Frequency', 'IntervalValue',
         'IntervalUnit', 'NextTriggerDate', 'ReminderTime', 'StartDate',
-        'EndDate', 'CreatedBy', 'CreatedAt', 'Status'
+        'EndDate', 'CreatedBy', 'CreatedAt', 'Status', 'SourceTaskId'
       ]);
-      existing.getRange(1, 1, 1, 16).setFontWeight('bold');
+      existing.getRange(1, 1, 1, 17).setFontWeight('bold');
       existing.setFrozenRows(1);
       existing.setColumnWidth(2, 200);
       existing.setColumnWidth(10, 140);
       // Ensure it's in the cache if global cache exists
       if (typeof _sheetCache !== 'undefined') _sheetCache[SHEETS.RECURRING_TASKS] = existing;
     }
-    return existing;
+    return ensureRecurringSourceTaskColumn_(existing);
   } catch (e) {
     console.error('setupRecurringTasksSheet_Internal_: failed to create RecurringTasks sheet: ' + e.message);
     return null;
   }
+}
+
+function ensureRecurringSourceTaskColumn_(sheet) {
+  if (!sheet) return sheet;
+  if (sheet.getLastColumn() < REC_COL.SOURCE_TASK_ID + 1) {
+    sheet.getRange(1, REC_COL.SOURCE_TASK_ID + 1).setValue('SourceTaskId');
+    sheet.getRange(1, 1, 1, REC_COL.SOURCE_TASK_ID + 1).setFontWeight('bold');
+  }
+  return sheet;
 }
 
 
@@ -202,6 +212,53 @@ function findRecRow_(recId) {
   return null;
 }
 
+function recurringLegacyKey_(title, assigneeEmail) {
+  return String(assigneeEmail || '').toLowerCase().trim() + '|' + String(title || '').toLowerCase().trim();
+}
+
+function recurringTaskHasSourceTag_(row) {
+  if (!row) return false;
+  if (typeof isRecurringTaskRow_ === 'function') return isRecurringTaskRow_(row);
+  return String(row[COL.TAGS] || '').split(',').map(function (t) {
+    return String(t).trim();
+  }).indexOf('__recurring') !== -1;
+}
+
+function buildRecurringSourceTaskMap_() {
+  var out = { byId: {}, byLegacyKey: {} };
+  var taskSheet = getSheet(SHEETS.TASKS);
+  if (!taskSheet) return out;
+
+  var rows = taskSheet.getDataRange().getValues();
+  for (var i = 1; i < rows.length; i++) {
+    var row = rows[i];
+    var taskId = row[COL.TASK_ID];
+    if (!taskId || !recurringTaskHasSourceTag_(row)) continue;
+
+    var source = {
+      taskId: taskId,
+      title: row[COL.TASK_NAME] || '',
+      assigneeEmail: row[COL.OWNER_EMAIL] || '',
+      status: row[COL.STATUS] || '',
+      row: row
+    };
+    out.byId[String(taskId)] = source;
+    out.byLegacyKey[recurringLegacyKey_(source.title, source.assigneeEmail)] = source;
+  }
+  return out;
+}
+
+function resolveRecurringSourceTask_(row, sourceMap) {
+  var sourceTaskId = row[REC_COL.SOURCE_TASK_ID] || '';
+  if (sourceTaskId && sourceMap.byId[String(sourceTaskId)]) return sourceMap.byId[String(sourceTaskId)];
+  return sourceMap.byLegacyKey[recurringLegacyKey_(row[REC_COL.TITLE], row[REC_COL.ASSIGNEE_EMAIL])] || null;
+}
+
+function isRecurringSourceReminderEligible_(source) {
+  if (!source) return false;
+  return source.status === STATUS.ON_HOLD;
+}
+
 // ------------------------------------------------------------------
 // createRecurringTask
 // Owner or Manager. Manager can only create for their own team.
@@ -264,7 +321,8 @@ function createRecurringTask(taskData) {
       endDate ? toDateStr_(endDate) : '',// M EndDate
       actor.email,                      // N CreatedBy
       now.toISOString(),                // O CreatedAt
-      REC_STATUS.ACTIVE                 // P Status
+      REC_STATUS.ACTIVE,                // P Status
+      ''                                // Q SourceTaskId
     ]);
 
     emitEvent_({
@@ -414,7 +472,8 @@ function getRecurringTasks() {
         startDate: toDateStrSafe_(row[REC_COL.START_DATE]),
         endDate: toDateStrSafe_(row[REC_COL.END_DATE]),
         createdBy: row[REC_COL.CREATED_BY],
-        status: row[REC_COL.STATUS]
+        status: row[REC_COL.STATUS],
+        sourceTaskId: row[REC_COL.SOURCE_TASK_ID] || ''
       });
     }
 
@@ -452,6 +511,7 @@ function runRecurringReminderEngine_() {
     if (data.length < 2) return 0;
 
     var todayStr = toDateStr_(new Date());
+    var sourceTaskMap = buildRecurringSourceTaskMap_();
     var fired = 0;
 
     for (var i = 1; i < data.length; i++) {
@@ -460,6 +520,18 @@ function runRecurringReminderEngine_() {
 
       // Skip paused
       if (row[REC_COL.STATUS] !== REC_STATUS.ACTIVE) continue;
+
+      // A recurring series may email only while its source task is still On Hold.
+      // Done, Archived, moved, or unlinked legacy rows are paused before they can fire.
+      var sourceTask = resolveRecurringSourceTask_(row, sourceTaskMap);
+      if (!isRecurringSourceReminderEligible_(sourceTask)) {
+        sheet.getRange(i + 1, REC_COL.STATUS + 1).setValue(REC_STATUS.PAUSED);
+        console.log('runRecurringReminderEngine_: auto-paused inactive/unlinked recurring task ' + row[REC_COL.ID]);
+        continue;
+      }
+      if (!row[REC_COL.SOURCE_TASK_ID] && sourceTask.taskId) {
+        sheet.getRange(i + 1, REC_COL.SOURCE_TASK_ID + 1).setValue(sourceTask.taskId);
+      }
 
       // Check end date — if past, auto-pause
       var endDateStr = toDateStrSafe_(row[REC_COL.END_DATE]);

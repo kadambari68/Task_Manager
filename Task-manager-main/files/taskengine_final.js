@@ -67,15 +67,7 @@ function createTask(taskData) {
     //             CANNOT assign to Owner role (Owner is not an operational resource)
     //             CANNOT assign to Members of other teams
     //   Member  → can only self-assign (creates task for themselves)
-    if (actor.role === 'Manager') {
-      // Permission Update: Managers can now assign to Owner.
-      // Cross-team coordination: own team members, other Managers, or the Owner.
-      var isAllowedTarget = (assignee.role === 'Owner') || (assignee.team === actor.team) || (assignee.role === 'Manager');
-      if (!isAllowedTarget) return err_('UNAUTHORIZED');
-    }
-    if (actor.role === 'Member' && assignee.email.toLowerCase() !== (actor.email || '').toLowerCase()) {
-      return err_('UNAUTHORIZED');
-    }
+    if (!canActorAssignTarget_(actor, assignee)) return err_('UNAUTHORIZED');
     // End assignment scope rules
 
     // S3 SPRINT 2: Validate projectId if provided.
@@ -167,7 +159,7 @@ function createTask(taskData) {
       timeSpentHrs: 0,
       slaHours: sla.slaHours,
       slaBreached: false,
-      notes: 'Task created and assigned to ' + assignee.name
+      notes: 'Task created for ' + assignee.name
     });
 
     // Send assignment email (non-blocking)
@@ -187,7 +179,7 @@ function createTask(taskData) {
     }
 
     invalidateTaskIndex_(); // Phase 4
-    return ok_({ taskId: taskId, message: taskId + ' assigned to ' + assignee.name });
+    return ok_({ taskId: taskId, message: 'Task created.' });
 
   } catch (e) {
     if (e.message === 'UNAUTHORIZED') return err_('UNAUTHORIZED');
@@ -219,9 +211,9 @@ function createRecurringFromTask_(taskId, clean, assignee, actor) {
   if (!clean || !clean.recurring) return null;
   var rec = clean.recurring || {};
 
-  var freq = 'MONTHLY';
-  var intervalVal = 1;
-  var intervalUnit = 'MONTH';
+  var freq = (rec && rec.frequency) || 'MONTHLY';
+  var intervalVal = parseInt(rec.intervalValue, 10) || 1;
+  var intervalUnit = (rec.intervalUnit || 'MONTH').toUpperCase();
 
   var startDate = parseDateOnly_(rec.startDate) || new Date();
   startDate.setHours(0, 0, 0, 0);
@@ -269,7 +261,8 @@ function createRecurringFromTask_(taskId, clean, assignee, actor) {
     endStr,                          // M EndDate
     actor.email || '',               // N CreatedBy
     now.toISOString(),               // O CreatedAt
-    status                           // P Status
+    status,                          // P Status
+    taskId                           // Q SourceTaskId
   ]);
 
   try {
@@ -309,7 +302,7 @@ function transitionTask_(taskId, toStatus, actor, notes, overrides) {
     // State machine check.
     // Exception: allow same-status reassignment when owner actually changes.
     // Recurring override: allow On Hold -> Done/Archived.
-    var allowRecurring = isRecurringTask && (toStatus === STATUS.DONE || toStatus === STATUS.ARCHIVED);
+    var allowRecurring = isRecurringTask && (toStatus === STATUS.ON_HOLD || toStatus === STATUS.DONE || toStatus === STATUS.ARCHIVED);
     if (!forceTransition && !canTransition_(fromStatus, toStatus) && !allowRecurring && !(isRoutingToNewPerson && fromStatus === toStatus)) {
       return err_('INVALID_TRANSITION');
     }
@@ -463,11 +456,7 @@ function routeTask(routeData) {
     //   Owner   → can route to anyone
     //   Manager → can route to own team members OR other Managers; never to Owner
     //   Member  → cannot route (handled above — only current owner can route)
-    if (actor.role === 'Manager') {
-      // Permission Update: Managers can now route to Owner.
-      var isAllowedRoute = (newAssignee.role === 'Owner') || (newAssignee.team === actor.team) || (newAssignee.role === 'Manager');
-      if (!isAllowedRoute) return err_('UNAUTHORIZED');
-    }
+    if (!canActorAssignTarget_(actor, newAssignee)) return err_('UNAUTHORIZED');
 
     // ── SELF-ROUTE: targetEmail === currentOwner ──────────────────────
     // routeTask always forces IN_PROGRESS, but transitionTask_ flags
@@ -560,6 +549,12 @@ function changeStatus(taskId, toStatus, notes) {
     }
 
     var result = transitionTask_(taskId, toStatus, actor, notes || '', null);
+    if (result.success && (toStatus === STATUS.DONE || toStatus === STATUS.ARCHIVED)) {
+      try { syncRecurringStatusWithTask_(taskId, 'PAUSED'); } catch (e) { }
+    }
+    if (result.success && toStatus === STATUS.ON_HOLD) {
+      try { syncRecurringStatusWithTask_(taskId, 'ACTIVE'); } catch (e) { }
+    }
     return result;
 
   } catch (e) {
@@ -600,11 +595,7 @@ function updateTaskDetails(payload) {
       if (desiredEmail && desiredEmail !== currentEmail) {
         newAssignee = getMemberByEmail_(desiredEmail);
         if (!newAssignee) return err_('INVALID_INPUT');
-        if (actor.role === 'Manager') {
-          var isAllowedEdit = (newAssignee.role === 'Owner') || (newAssignee.team === actor.team) || (newAssignee.role === 'Manager');
-          if (!isAllowedEdit) return err_('UNAUTHORIZED');
-        }
-        if (actor.role === 'Member' && String(newAssignee.email || '').toLowerCase() !== String(actor.email || '').toLowerCase()) return err_('UNAUTHORIZED');
+        if (!canActorAssignTarget_(actor, newAssignee)) return err_('UNAUTHORIZED');
         updates.assignee = newAssignee;
       }
     }
@@ -728,6 +719,7 @@ function completeTask(taskId) {
 
     var result = transitionTask_(taskId, STATUS.DONE, actor, 'Marked complete', null);
     if (!result.success) return result;
+    try { syncRecurringStatusWithTask_(taskId, 'PAUSED'); } catch (e) { }
 
     // Notify creator — SPRINT 1 FIX: was passing raw row.data array.
     // sendTaskCompletedEmail expects a parsed object {taskName,taskId,createdBy,createdByEmail,totalHours}.
@@ -771,6 +763,7 @@ function archiveTask(taskId, notes) {
     var result = transitionTask_(taskId, STATUS.ARCHIVED, actor, notes || 'Task archived', null);
     if (!result.success) return result;
 
+    try { syncRecurringStatusWithTask_(result.data.taskId, 'PAUSED'); } catch (e) { }
     try { emitSystemMessage_('team', actor.team, 'Task ' + taskId + ' archived by ' + actor.name); } catch (e) { }
     return ok_({ message: result.data.taskName + ' archived.' });
 
@@ -792,7 +785,10 @@ function reopenTask(taskId, notes) {
     // Only Owner/Manager can reopen completed tasks
     var actor = requireRole_(['Owner', 'Manager']);
 
-    var result = transitionTask_(taskId, STATUS.TODO, actor, notes || 'Task reopened', null);
+    var taskRow = findTaskRow_(taskId);
+    if (!taskRow) return err_('NOT_FOUND');
+    var targetStatus = isRecurringTaskRow_(taskRow.data) ? STATUS.ON_HOLD : STATUS.TODO;
+    var result = transitionTask_(taskId, targetStatus, actor, notes || 'Task reopened', null);
     if (!result.success) return result;
 
     // Notify current assignee (non-blocking)
@@ -804,6 +800,7 @@ function reopenTask(taskId, notes) {
       }
     } catch (e) { }
 
+    try { syncRecurringStatusWithTask_(taskId, 'ACTIVE'); } catch (e) { }
     // Phase 4 — auto-post to team chat
     try { emitSystemMessage_('team', actor.team, '↩️ ' + taskId + ' reopened by ' + actor.name); } catch (e) { }
     return ok_({ message: result.data.taskName + ' has been reopened.' });
@@ -1107,5 +1104,42 @@ function deleteUserReminder(reminderId) {
     if (e.message === 'UNAUTHORIZED') return err_('UNAUTHORIZED');
     console.error('deleteUserReminder: ' + e.message);
     return err_('SYSTEM_ERROR');
+  }
+}
+
+/**
+ * syncRecurringStatusWithTask_
+ * Bridge between Task status and RecurringTasks series.
+ * If taskId is archived, PAUSE the series. If reopened, ACTIVATE it.
+ */
+function syncRecurringStatusWithTask_(taskId, newStatus) {
+  try {
+    var taskRow = findTaskRow_(taskId);
+    if (!taskRow) return;
+    if (!isRecurringTaskRow_(taskRow.data)) return;
+
+    var title = taskRow.data[1];
+    var owner = taskRow.data[3];
+
+    var recSheet = (typeof getRecSheet_ === 'function') ? getRecSheet_() : getSheet(SHEETS.RECURRING_TASKS);
+    if (!recSheet) return;
+    var data = recSheet.getDataRange().getValues();
+    var statusCol = (typeof REC_COL !== 'undefined' && REC_COL.STATUS !== undefined) ? REC_COL.STATUS + 1 : 16;
+    var sourceCol = (typeof REC_COL !== 'undefined' && REC_COL.SOURCE_TASK_ID !== undefined) ? REC_COL.SOURCE_TASK_ID + 1 : 17;
+    var ownerLower = (owner || '').toLowerCase();
+
+    for (var i = 1; i < data.length; i++) {
+      var sourceTaskId = data[i][sourceCol - 1] || '';
+      var sourceMatch = String(sourceTaskId) === String(taskId);
+      var legacyMatch = !sourceTaskId && data[i][1] === title && (data[i][3] || '').toLowerCase() === ownerLower;
+
+      if (sourceMatch || legacyMatch) {
+        recSheet.getRange(i + 1, statusCol).setValue(newStatus);
+        if (!sourceTaskId) recSheet.getRange(i + 1, sourceCol).setValue(taskId);
+        console.log('syncRecurringStatusWithTask_: ' + taskId + ' (' + title + ') -> Series ' + data[i][0] + ' set to ' + newStatus);
+      }
+    }
+  } catch (e) {
+    console.warn('syncRecurringStatusWithTask_ failed: ' + e.message);
   }
 }
